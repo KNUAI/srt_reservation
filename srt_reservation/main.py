@@ -12,11 +12,13 @@ from selenium.common.exceptions import ElementClickInterceptedException, StaleEl
 
 from srt_reservation.exceptions import InvalidStationNameError, InvalidDateError, InvalidDateFormatError, InvalidTimeFormatError
 from srt_reservation.validation import station_list
+import asyncio
+import telegram
 
 chromedriver_path = r'C:\workspace\chromedriver.exe'
 
 class SRT:
-    def __init__(self, dpt_stn, arr_stn, dpt_dt, dpt_tm, num_trains_to_check=2, want_reserve=False):
+    def __init__(self, dpt_stn, arr_stn, dpt_dt, dpt_tm, num_trains_to_check=2, want_special=False, want_reserve=False):
         """
         :param dpt_stn: SRT 출발역
         :param arr_stn: SRT 도착역
@@ -34,6 +36,7 @@ class SRT:
         self.dpt_tm = dpt_tm
 
         self.num_trains_to_check = num_trains_to_check
+        self.want_special = want_special
         self.want_reserve = want_reserve
         self.driver = None
 
@@ -60,7 +63,7 @@ class SRT:
 
     def run_driver(self):
         try:
-            self.driver = webdriver.Chrome(executable_path=chromedriver_path)
+            self.driver = webdriver.Chrome()
         except WebDriverException:
             self.driver = webdriver.Chrome(ChromeDriverManager().install())
 
@@ -123,10 +126,40 @@ class SRT:
             try:
                 self.driver.find_element(By.CSS_SELECTOR,
                                          f"#result-form > fieldset > div.tbl_wrap.th_thead > table > tbody > tr:nth-child({i}) > td:nth-child(7) > a").click()
+                self._close_alert()
             except ElementClickInterceptedException as err:
                 print(err)
                 self.driver.find_element(By.CSS_SELECTOR,
                                          f"#result-form > fieldset > div.tbl_wrap.th_thead > table > tbody > tr:nth-child({i}) > td:nth-child(7) > a").send_keys(
+                    Keys.ENTER)
+            finally:
+                self.driver.implicitly_wait(3)
+
+            # 예약이 성공하면
+            if self.driver.find_elements(By.ID, 'isFalseGotoMain'):
+                self.is_booked = True
+                print("예약 성공")
+                return self.driver
+            else:
+                print("잔여석 없음. 다시 검색")
+                self.driver.back()  # 뒤로가기
+                self.driver.implicitly_wait(5)
+
+    def book_special_ticket(self, specail_seat, i):
+        # specail_seat는 특석 검색 결과 텍스트
+        
+        if "예약하기" in specail_seat:
+            print("예약 가능 클릭")
+
+            # Error handling in case that click does not work
+            try:
+                self.driver.find_element(By.CSS_SELECTOR,
+                                         f"#result-form > fieldset > div.tbl_wrap.th_thead > table > tbody > tr:nth-child({i}) > td:nth-child(6) > a").click()
+                self._close_alert()
+            except ElementClickInterceptedException as err:
+                print(err)
+                self.driver.find_element(By.CSS_SELECTOR,
+                                         f"#result-form > fieldset > div.tbl_wrap.th_thead > table > tbody > tr:nth-child({i}) > td:nth-child(6) > a").send_keys(
                     Keys.ENTER)
             finally:
                 self.driver.implicitly_wait(3)
@@ -159,9 +192,10 @@ class SRT:
 
     def check_result(self):
         while True:
-            for i in range(1, self.num_trains_to_check+1):
+            for i in range(self.num_trains_to_check, self.num_trains_to_check+1):
                 try:
                     standard_seat = self.driver.find_element(By.CSS_SELECTOR, f"#result-form > fieldset > div.tbl_wrap.th_thead > table > tbody > tr:nth-child({i}) > td:nth-child(7)").text
+                    special_seat = self.driver.find_element(By.CSS_SELECTOR, f"#result-form > fieldset > div.tbl_wrap.th_thead > table > tbody > tr:nth-child({i}) > td:nth-child(6)").text
                     reservation = self.driver.find_element(By.CSS_SELECTOR, f"#result-form > fieldset > div.tbl_wrap.th_thead > table > tbody > tr:nth-child({i}) > td:nth-child(8)").text
                 except StaleElementReferenceException:
                     standard_seat = "매진"
@@ -169,6 +203,9 @@ class SRT:
 
                 if self.book_ticket(standard_seat, i):
                     return self.driver
+                
+                if self.want_special:
+                    self.book_special_ticket(special_seat, i)
 
                 if self.want_reserve:
                     self.reserve_ticket(reservation, i)
@@ -180,12 +217,27 @@ class SRT:
                 time.sleep(randint(2, 4))
                 self.refresh_result()
 
+    def _close_alert(self):
+        try:
+            alert = self.driver.switch_to.alert
+            alert_text = alert.text
+            print(f"Alert detected: {alert_text}")
+            alert.accept()  # 알림 창을 닫습니다.
+        except:
+            print("No alert to close.")
+
+    def tel(self):
+        bot = telegram.Bot(token='')
+        chat_id = 0  # 숫자
+        asyncio.run(bot.sendMessage(chat_id=chat_id, text="예약 완료!"))
+
     def run(self, login_id, login_psw):
         self.run_driver()
         self.set_log_info(login_id, login_psw)
         self.login()
         self.go_search()
         self.check_result()
+        # self.tel()
 
 #
 # if __name__ == "__main__":

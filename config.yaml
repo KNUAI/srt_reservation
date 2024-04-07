@@ -1,0 +1,9 @@
+login_id: "회원번호"
+login_psw: "비밀번호"
+dpt_stn: "출발역"
+arr_stn: "도착역"
+dpt_dt: "출발날짜"
+dpt_tm: "출발시간"
+num_trains_to_check:   # 출발시간 기준 열차순서
+want_special: False
+want_reserve: False
